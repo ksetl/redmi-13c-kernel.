@@ -1,0 +1,62 @@
+name: Compilar Kernel Redmi 13C con KSU Next
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Maximizar espacio en disco
+        uses: easimon/maximize-build-space@master
+        with:
+          root-reserve-mb: 512
+          swap-size-mb: 1024
+          remove-dotnet: 'true'
+          remove-android: 'true'
+          remove-haskell: 'true'
+
+      - name: Instalar herramientas de compilación
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y bc build-essential libelf-dev cc aching-compiler ccache libssl-dev clazz cpio rsync git bison flex textinfo libgmp-dev libmpfr-dev libmpc-dev
+
+      - name: Descargar Código Fuente del Kernel (Xiaomi Stock)
+        run: |
+          git clone --depth=1 -b gale-s-oss https://github.com/MiCode/Xiaomi_Kernel_OpenSource.git source
+          
+      - name: Descargar Toolchain (Clang de Google)
+        run: |
+          mkdir toolchain
+          cd toolchain
+          wget https://android.googlesource.com/platform/prebuilts/clang/host/linux-x86/+archive/refs/heads/main/clang-r487747c.tar.gz
+          tar -zxf clang-r487747c.tar.gz
+          rm clang-r487747c.tar.gz
+
+      - name: Integrar KernelSU-Next
+        run: |
+          cd source
+          curl -LSs "https://raw.githubusercontent.com/rifsxd/KernelSU-Next/next/kernel/setup.sh" | bash -s next
+          
+      - name: Compilar el Kernel
+        run: |
+          cd source
+          export PATH=$GITHUB_WORKSPACE/toolchain/bin:$PATH
+          export ARCH=arm64
+          export SUBARCH=arm64
+          export HEADER_ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-android-
+          export CC=clang
+          
+          make O=out gale_user_defconfig
+          
+          scripts/config --file out/.config --enable CONFIG_KSU
+          scripts/config --file out/.config --enable CONFIG_OVERLAY_FS
+          
+          make -j$(nproc --all) O=out
+
+      - name: Subir Archivo Compilado
+        uses: actions/upload-artifact@v4
+        with:
+          name: Image-Redmi13C-KSU-Next
+          path: source/out/arch/arm64/boot/Image.gz
